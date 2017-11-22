@@ -105,7 +105,12 @@ const char *errorpage =
     "{\"status\":{\"code\":\"200\","		\
     "\"description\":\"OK\"}}"
 
-char flist_name[BUFFER_SIZE];
+char flist_name[BUFFER_SIZE*2];
+char destpath_name[BUFFER_SIZE];
+
+
+
+int connect_index = 0;
 
 char *json_get_value(const json_object *obj, char *name)
 {
@@ -124,17 +129,136 @@ char *json_get_value(const json_object *obj, char *name)
     return NULL;
 }
 
-int get_input_flist(json_object *obj, char *buff)
+char *random_uuid(char buf[37])
+{
+    const char *c = "89ab";
+    char *p = buf;
+    int n;
+    for( n = 0; n < 16; ++n )
+    {
+        int b = rand()%255;
+        switch( n )
+        {
+            case 6:
+                sprintf(p, "4%x", b%15 );
+            break;
+            case 8:
+                sprintf(p, "%c%x", c[rand()%strlen(c)], b%15 );
+            break;
+            default:
+                sprintf(p, "%02x", b);
+            break;
+        }
+ 
+        p += 2;
+        switch( n )
+        {
+            case 3:
+            case 5:
+            case 7:
+            case 9:
+                *p++ = '-';
+                break;
+        }
+    }
+    *p = 0;
+    return buf;
+}
+
+char *generate_flist_file_name(char *flist_name)
+{
+    char guid[37];
+
+    random_uuid(guid);
+
+    sprintf(flist_name, "%s/%s-%d",destpath_name, guid, connect_index);
+
+    return flist_name;
+}
+
+static int encode_fname(char* buf)
+{
+    char* ptr = buf;
+    struct stat st;
+    size_t len;
+    int ret;
+
+    ret = lstat(buf, &st);
+    if (ret < 0)
+        return ret;
+
+    len = strlen(buf);
+    ptr += len;
+
+    *ptr = '|';
+    ptr++;
+
+    if (S_ISREG(st.st_mode)) {
+        *ptr = 'F';
+    }
+    else if (S_ISDIR(st.st_mode)) {
+        *ptr = 'D';
+    }
+    else if (S_ISLNK(st.st_mode)) {
+        *ptr = 'L';
+    }
+    else {
+        *ptr = 'U';
+    }
+    ptr++;
+
+    *ptr = '\n';
+    return 0;
+}
+
+int store_fnames_into_flist(char *fname_buff, char *flist_name)
+{
+    int fd = open(flist_name, O_RDWR|O_CREAT);
+    char tmp_name[BUFFER_SIZE];
+
+    if (fd < 0)
+        return -1;
+
+    char*token = strtok(fname_buff, ",");
+
+    while (token != NULL) {
+        memset(tmp_name, 0, BUFFER_SIZE);
+        strcpy(tmp_name, token);
+        if (encode_fname(tmp_name) < 0)
+            continue;
+        write(fd, tmp_name, strlen(tmp_name));
+        token = strtok(NULL, ",");
+    }
+    close(fd);
+    return 0;
+}
+
+int get_input_flist(json_object *obj)
 {
     char *value;
 
-    memset(buff, 0, BUFFER_SIZE);
+
     value = json_get_value(obj, "flist");
     if (value && strlen(value)) {
-        strncpy(buff, value, strlen(value));
-        return 0;
-    }
+        char *buff = malloc(BUFFER_SIZE*BUFFER_SIZE);
+        char name[BUFFER_SIZE*2];
+        int ret;
 
+        memset(buff, 0, BUFFER_SIZE*BUFFER_SIZE);
+        connect_index++;
+
+        generate_flist_file_name(name);
+
+        strncpy(buff, value, strlen(value));
+
+        ret = store_fnames_into_flist(buff, name);
+        if (!ret)
+            strncpy(flist_name, name, strlen(name));
+
+        free(buff);
+        return ret;
+    }
+    
     return -1;
 }
 
@@ -236,7 +360,7 @@ static int answer_to_connection(void *cls, struct MHD_Connection *connection,
 
             MFU_LOG(MFU_LOG_INFO, "Post data: %s\n", con_info->answerstring);
             json_object *obj = json_tokener_parse(con_info->answerstring);
-            ret = get_input_flist(obj, flist_name);
+            ret = get_input_flist(obj);
             json_object_put(obj);
             if (!ret)
                 return send_page(connection, HTTP_RESPONSE_200_OK);
@@ -516,6 +640,8 @@ int main(int argc, \
     mfu_flist flist = mfu_flist_new();
 
     if (run_as_daemon) {
+        strcpy(destpath_name, destpath->target);
+
         while (1) {
             if (rank == 0) {
                 memset(flist_name, 0, BUFFER_SIZE);
@@ -565,7 +691,6 @@ int main(int argc, \
 
             /* otherwise, read list of files from input, but then stat each one */
             mfu_flist input_flist = mfu_flist_new();
-            MFU_LOG(MFU_LOG_INFO, "######:%s", inputname);
             mfu_flist_read_cache(inputname, input_flist);
 
             skip_args.numpaths = numpaths_src;
