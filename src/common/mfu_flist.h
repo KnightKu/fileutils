@@ -317,7 +317,7 @@ void mfu_flist_copy(mfu_flist src_cp_list, int numpaths,
         mfu_copy_opts_t* mfu_copy_opts);
 
 /* unlink all items in flist */
-void mfu_flist_unlink(mfu_flist flist);
+void mfu_flist_unlink(mfu_flist flist, int traceless);
 
 int mfu_input_flist_skip(const char* name, void *args);
 

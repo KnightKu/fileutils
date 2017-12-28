@@ -1148,7 +1148,7 @@ static void dcmp_sync_files(strmap* src_map, strmap* dst_map,
      * and then remove those files */
     dcmp_only_dst(src_map, dst_map, dst_list, dst_remove_list);
     mfu_flist_summarize(dst_remove_list);
-    mfu_flist_unlink(dst_remove_list);
+    mfu_flist_unlink(dst_remove_list, 0);
         
     /* summarize the src copy list for files 
      * that need to be copied into dest directory */ 
