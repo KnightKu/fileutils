@@ -47,8 +47,44 @@
 
 /* removes name by calling rmdir, unlink, or remove depending
  * on item type */
-static void remove_type(char type, const char* name)
+static void remove_type(char type, const char* name, int traceless)
 {
+
+    char *pdir;
+    struct timespec times[2];
+    int status = -1;
+
+    if (traceless) {
+        struct stat st;
+
+        pdir = MFU_STRDUP(name);
+        dirname(pdir);
+        status = mfu_lstat(pdir, &st);
+        if (!status) {
+            times[0].tv_sec  = st.st_atime;
+            times[1].tv_sec  = st.st_mtime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+            times[0].tv_nsec = st.st_atimespec.tv_nsec;
+            times[1].tv_nsec = st.st_mtimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+            times[0].tv_nsec = st.st_atim.tv_nsec;
+            times[1].tv_nsec = st.st_mtim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+            times[0].tv_nsec = st.st_atime_n;
+            times[1].tv_nsec = st.st_mtime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+            times[0].tv_nsec = st.st_uatime * 1000;
+            times[1].tv_nsec = st.st_umtime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+            times[0].tv_nsec = st.st_atime_usec * 1000;
+            times[1].tv_nsec = st.st_mtime_usec * 1000;
+#else
+            times[0].tv_nsec = 0;
+            times[1].tv_nsec = 0;
+#endif
+        }
+    }
     /* TODO: don't print message if errno == ENOENT (file already gone) */
     if (type == 'd') {
         int rc = mfu_rmdir(name);
@@ -81,6 +117,14 @@ static void remove_type(char type, const char* name)
                  );
     }
 
+    if (traceless && !status) {
+        if(utimensat(AT_FDCWD, pdir, times, AT_SYMLINK_NOFOLLOW) != 0) {
+            MFU_LOG(MFU_LOG_ERR, "Failed to changeback timestamps on %s utime() errno=%d %s",
+                pdir, errno, strerror(errno));
+        }
+
+        mfu_free(&pdir);
+    }
     return;
 }
 
@@ -101,13 +145,13 @@ static void remove_direct(mfu_flist list, uint64_t* rmcount)
 
         /* delete item */
         if (type == MFU_TYPE_DIR) {
-            remove_type('d', name);
+            remove_type('d', name, 0);
         }
         else if (type == MFU_TYPE_FILE || type == MFU_TYPE_LINK) {
-            remove_type('f', name);
+            remove_type('f', name, 0);
         }
         else {
-            remove_type('u', name);
+            remove_type('u', name, 0);
         }
     }
 
@@ -136,7 +180,7 @@ static int get_first_nonzero(const int* buf, int size)
 
 /* for given depth, evenly spread the files among processes for
  * improved load balancing */
-static void remove_spread(mfu_flist flist, uint64_t* rmcount)
+static void remove_spread(mfu_flist flist, uint64_t* rmcount, int traceless)
 {
     uint64_t idx;
 
@@ -308,7 +352,7 @@ static void remove_spread(mfu_flist flist, uint64_t* rmcount)
         char* name = &item[1];
 
         /* delete item */
-        remove_type(type, name);
+        remove_type(type, name, traceless);
 
         /* keep tally of number of items we deleted */
         *rmcount++;
@@ -442,7 +486,7 @@ static void remove_sort(mfu_flist list, uint64_t* rmcount)
         ptr++;
 
         /* delete item */
-        remove_type(type, name);
+        remove_type(type, name, 0);
         delcount++;
     }
 
@@ -576,7 +620,7 @@ static void remove_libcircle(mfu_flist list, uint64_t* rmcount)
 /* removes list of items, sets write bits on directories from
  * top-to-bottom, then removes items one level at a time starting
  * from the deepest */
-void mfu_flist_unlink(mfu_flist flist)
+void mfu_flist_unlink(mfu_flist flist, int traceless)
 {
     int level;
 
@@ -642,7 +686,7 @@ void mfu_flist_unlink(mfu_flist flist)
 
         uint64_t count = 0;
         //remove_direct(list, &count);
-        remove_spread(list, &count);
+        remove_spread(list, &count, traceless);
 //        remove_map(list, &count);
 //        remove_sort(list, &count);
 //        remove_libcircle(list, &count);

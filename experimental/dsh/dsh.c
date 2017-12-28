@@ -2010,7 +2010,7 @@ int main(int argc, char** argv)
                 int inclusive = 1;
                 mfu_flist filtered, leftover;
                 filter_files_path(flist, remove_path, inclusive, &filtered, &leftover);
-                mfu_flist_unlink(filtered);
+                mfu_flist_unlink(filtered, 0);
                 mfu_flist_free(&filtered);
 
                 /* to update our list after removing files above, set flist
