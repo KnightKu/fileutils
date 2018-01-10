@@ -281,6 +281,7 @@ uint64_t mfu_flist_file_get_ctime(mfu_flist flist, uint64_t index);
 uint64_t mfu_flist_file_get_ctime_nsec(mfu_flist flist, uint64_t index);
 uint64_t mfu_flist_file_get_size(mfu_flist flist, uint64_t index);
 uint64_t mfu_flist_file_get_perm(mfu_flist flist, uint64_t index);
+void *mfu_flist_file_get_acl(mfu_flist bflist, uint64_t idx, ssize_t *acl_size, char *type);
 const char* mfu_flist_file_get_username(mfu_flist flist, uint64_t index);
 const char* mfu_flist_file_get_groupname(mfu_flist flist, uint64_t index);
 
