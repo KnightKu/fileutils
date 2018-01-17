@@ -330,6 +330,7 @@ int mfu_flist_sort(const char* fields, mfu_flist* flist);
 
 /* given a list of files print from start and end of the list */
 void mfu_flist_print(mfu_flist flist);
+void mfu_flist_print_full(mfu_flist flist);
 
 /* TODO: integrate this into the file list proper, or otherwise move it to another file */
 /* used to create a linked list of copy_elem's */

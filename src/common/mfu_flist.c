@@ -1456,3 +1456,90 @@ void mfu_flist_print(mfu_flist flist)
 
     return;
 }
+
+void mfu_flist_print_full(mfu_flist flist)
+{
+    /* get our rank and the size of comm_world */
+    int rank, ranks;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &ranks);
+
+    /* identify the number of items we have, the total number,
+     * and our offset in the global list */
+    uint64_t count  = mfu_flist_size(flist);
+    uint64_t total  = mfu_flist_global_size(flist);
+    uint64_t offset = mfu_flist_global_offset(flist);
+
+    /* allocate send and receive buffers */
+    size_t pack_size = mfu_flist_file_pack_size(flist);
+    void* sendbuf = MFU_MALLOC(count * pack_size);
+    void* recvbuf = MFU_MALLOC(total * pack_size);
+
+    /* allocate arrays to store counts and displacements */
+    int* counts = (int*) MFU_MALLOC((size_t)ranks * sizeof(int));
+    int* disps  = (int*) MFU_MALLOC((size_t)ranks * sizeof(int));
+
+    /* tell rank 0 where the data is coming from */
+    int bytes = count * (int)pack_size;
+    MPI_Gather(&bytes, 1, MPI_INT, counts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    /* pack items into sendbuf */
+    uint64_t idx = 0;
+    char* ptr = (char*) sendbuf;
+    while (idx < count) {
+        ptr += mfu_flist_file_pack(ptr, flist, idx);
+        idx++;
+    }
+
+    /* compute displacements and total bytes */
+    int recvbytes = 0;
+    if (rank == 0) {
+        int i;
+        disps[0] = 0;
+        recvbytes += counts[0];
+        for (i = 1; i < ranks; i++) {
+            disps[i] = disps[i - 1] + counts[i - 1];
+            recvbytes += counts[i];
+        }
+    }
+
+    /* gather data to rank 0 */
+    MPI_Gatherv(sendbuf, bytes, MPI_BYTE, recvbuf, counts, disps, MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    /* create temporary list to unpack items into */
+    mfu_flist tmplist = mfu_flist_subset(flist);
+
+    /* unpack items into new list */
+    if (rank == 0) {
+        ptr = (char*) recvbuf;
+        char* end = ptr + recvbytes;
+        while (ptr < end) {
+            mfu_flist_file_unpack(ptr, tmplist);
+            ptr += pack_size;
+        }
+    }
+
+    /* summarize list */
+    mfu_flist_summarize(tmplist);
+
+    /* print files */
+    if (rank == 0) {
+        printf("\n");
+        uint64_t tmpidx = 0;
+        uint64_t tmpsize = mfu_flist_size(tmplist);
+        while (tmpidx < tmpsize) {
+            print_file(tmplist, tmpidx);
+            tmpidx++;
+        }
+        printf("\n");
+    }
+
+    /* free our temporary list */
+    mfu_flist_free(&tmplist);
+
+    /* free memory */
+    mfu_free(&disps);
+    mfu_free(&counts);
+    mfu_free(&sendbuf);
+    mfu_free(&recvbuf);
+}

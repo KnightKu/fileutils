@@ -360,6 +360,7 @@ static void print_usage(void)
     printf("  -s, --sort <fields>                     - sort output by comma-delimited fields\n");
     printf("  -d, --distribution <field>:<separators> - print distribution by field\n");
     printf("  -p, --print                             - print files to screen\n");
+    printf("  -f, --full                              - print all files to screen, don't snip\n");
     printf("  -v, --verbose                           - verbose output\n");
     printf("  -h, --help                              - print usage\n");
     printf("\n");
@@ -399,6 +400,7 @@ int main(int argc, char** argv)
     char* distribution = NULL;
     int walk = 0;
     int print = 0;
+    int full = 0;
     struct distribute_option option;
 
     int option_index = 0;
@@ -409,6 +411,7 @@ int main(int argc, char** argv)
         {"sort",         1, 0, 's'},
         {"distribution", 1, 0, 'd'},
         {"print",        0, 0, 'p'},
+        {"full",         0, 0, 'f'},
         {"verbose",      0, 0, 'v'},
         {"help",         0, 0, 'h'},
         {0, 0, 0, 0}
@@ -417,7 +420,7 @@ int main(int argc, char** argv)
     int usage = 0;
     while (1) {
         int c = getopt_long(
-                    argc, argv, "i:o:ls:d:pvh",
+                    argc, argv, "i:o:ls:d:pfvh",
                     long_options, &option_index
                 );
 
@@ -443,6 +446,9 @@ int main(int argc, char** argv)
                 break;
             case 'p':
                 print = 1;
+                break;
+            case 'f':
+                full = 1;
                 break;
             case 'v':
                 mfu_debug_level = MFU_LOG_VERBOSE;
@@ -602,8 +608,12 @@ int main(int argc, char** argv)
     }
 
     /* print details for individual files */
-    if (print) {
-        mfu_flist_print(flist);
+    if (print) { 
+        if (full) {
+            mfu_flist_print_full(flist);
+        } else {
+            mfu_flist_print(flist);
+        }
     }
 
     /* print summary about all files */
