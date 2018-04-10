@@ -91,6 +91,7 @@ AC_CONFIG_FILES([Makefile                \
                  src/drm/Makefile        \
                  src/dstripe/Makefile    \
                  src/dwalk/Makefile      \
+                 src/dsync/Makefile      \
                  doc/Makefile            \
                  doc/man/Makefile        \
                  doc/man/man1/Makefile   \
