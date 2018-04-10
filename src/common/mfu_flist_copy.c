@@ -1438,6 +1438,9 @@ void mfu_flist_copy(mfu_flist src_cp_list, int numpaths,
     mfu_create_files(levels, minlevel, lists, numpaths,
             paths, destpath, mfu_copy_opts);
 
+    /* force the creation to backend */
+    sync();
+
     /* copy data */
     mfu_copy_files(src_cp_list, mfu_copy_opts->chunk_size, 
             numpaths, paths, destpath, mfu_copy_opts);
