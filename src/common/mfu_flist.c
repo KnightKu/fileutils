@@ -919,8 +919,18 @@ uint64_t mfu_flist_file_get_size(mfu_flist bflist, uint64_t idx)
     uint64_t ret = (uint64_t) - 1;
     flist_t* flist = (flist_t*) bflist;
     elem_t* elem = list_get_elem(flist, idx);
-    if (elem != NULL && flist->detail) {
-        ret = elem->size;
+    if (elem != NULL) {
+        if (flist->detail) {
+            ret = elem->size;
+        } else {
+            struct stat sb;
+            char *name = elem->file;
+
+            int rc = mfu_lstat(name, &sb);
+            if (rc == 0) {
+                ret = (uint64_t) sb.st_size;
+            }
+        }
     }
     return ret;
 }
@@ -1098,6 +1108,61 @@ mfu_flist mfu_flist_subset(mfu_flist src)
     }
 
     return bflist;
+}
+
+static bool filter_excute(const struct mfu_filter *filter, uint64_t size)
+{
+    if (filter == NULL)
+        return true;
+
+    int len = strlen(filter->operator);
+
+    if (len == 1) {
+        if (!strcmp(filter->operator, "="))
+            return (size == filter->value);
+        else if (!strcmp(filter->operator, ">"))
+            return (size > filter->value);
+        else if (!strcmp(filter->operator, "<"))
+            return (size < filter->value);
+        return false;
+    } else if (len == 2) {
+        if (!strcmp(filter->operator, ">="))
+            return (size >= filter->value);
+        else if (!strcmp(filter->operator, "<="))
+            return (size <= filter->value);
+        return false;
+    }
+
+    return false;
+}
+
+/* give a filter (only support size first), filter the flist, return the filtered one */
+mfu_flist mfu_flist_filter(mfu_flist *flist, const struct mfu_filter *filter)
+{
+    /* create our list to return */
+    mfu_flist dest = mfu_flist_subset(flist);
+
+    /* check if user passed in an expression, if so then filter the list */
+    if (filter != NULL) {
+        uint64_t idx = 0;
+        uint64_t size = mfu_flist_size(flist);
+
+        while (idx < size) {
+            uint64_t fsize = mfu_flist_file_get_size(flist, idx);
+
+            if (filter_excute(filter, fsize)) {
+                mfu_flist_file_copy(flist, idx, dest);
+            }
+            /* get next item in our list */
+            idx++;
+        }
+
+        /* summarize the filtered list */
+        mfu_flist_summarize(dest);
+    }
+
+    /* return the filtered list */
+    return dest;
 }
 
 /* given an input flist, return a newly allocated flist consisting of 

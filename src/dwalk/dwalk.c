@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <time.h> /* asctime / localtime */
+#include <regex.h>
 
 #include <stdarg.h> /* variable length args */
 
@@ -296,6 +297,79 @@ static int distribute_separator_add(struct distribute_option *option, uint64_t s
     return 0;
 }
 
+static bool valid_filter_operator(const char *operator)
+{
+    int len = strlen(operator);
+
+    if (len == 1) {
+        if (!strcmp(operator, "=") ||
+            !strcmp(operator, "<") ||
+            !strcmp(operator, ">"))
+            return true;
+        else
+            return false;
+    } else if (len == 2) {
+        if (!strcmp(operator, ">=") ||
+            !strcmp(operator, "<="))
+            return true;
+        else
+            return false;
+    }
+
+    return false;
+}
+
+static int filter_parse(struct mfu_filter *filter, const char *string)
+{
+    char *ptr;
+    uint64_t value;
+    char *str;
+    int status = 0;
+    regmatch_t pmatch[100];
+    regex_t reg;
+    char * pattern = "([A-Za-z]+):([>|<|=|>=|<=]+):([A-Za-z0-9]+)";
+    int i = 0;
+    char buf[100];
+    int res = regcomp(&reg, pattern, REG_EXTENDED | REG_NEWLINE);
+
+    if(res) {
+        return -1;
+    }
+
+    str = MFU_STRDUP(string);
+
+    status = regexec(&reg, str, sizeof(pmatch)/sizeof(regmatch_t), pmatch, 0);
+    if (status == REG_NOMATCH) {
+        status = -1;
+        goto out;
+    }
+
+    strncpy(buf, str + pmatch[1].rm_so, pmatch[1].rm_eo - pmatch[1].rm_so);
+    buf[pmatch[1].rm_eo - pmatch[1].rm_so] = '\0';
+    strncpy(filter->field, buf, 15);
+
+    strncpy(buf, str + pmatch[2].rm_so, pmatch[2].rm_eo - pmatch[2].rm_so);
+    buf[pmatch[2].rm_eo - pmatch[2].rm_so] = '\0';
+
+    if (!valid_filter_operator(buf)) {
+        status = -1;
+        goto out;
+    }
+    strncpy(filter->operator, buf, 7);
+
+    strncpy(buf, str + pmatch[3].rm_so, pmatch[3].rm_eo - pmatch[3].rm_so);
+    buf[pmatch[3].rm_eo - pmatch[3].rm_so] = '\0';
+    if (mfu_abtoull(buf, &value) != MFU_SUCCESS) {
+        status = -1;
+        goto out;
+    }
+    filter->value = value;
+out:
+    regfree(&reg);
+    mfu_free(&str);
+    return status;
+}
+
 static int distribution_parse(struct distribute_option *option, const char *string)
 {
     char *ptr;
@@ -358,6 +432,8 @@ static void print_usage(void)
     printf("  -o, --output <file>                     - write processed list to file\n");
     printf("  -l, --lite                              - walk file system without stat\n");
     printf("  -s, --sort <fields>                     - sort output by comma-delimited fields\n");
+    printf("  -f, --filter <field>:<operator>:<value> - filter output by field, only support size now\n");
+    printf("      --filter \"size:>:1T\" \n");
     printf("  -d, --distribution <field>:<separators> - print distribution by field\n");
     printf("  -p, --print                             - print files to screen\n");
     printf("  -v, --verbose                           - verbose output\n");
@@ -397,6 +473,8 @@ int main(int argc, char** argv)
     char* outputname = NULL;
     char* sortfields = NULL;
     char* distribution = NULL;
+    char* filter_string = NULL;
+    struct mfu_filter *size_filter = NULL;
     int walk = 0;
     int print = 0;
     struct distribute_option option;
@@ -408,6 +486,7 @@ int main(int argc, char** argv)
         {"lite",         0, 0, 'l'},
         {"sort",         1, 0, 's'},
         {"distribution", 1, 0, 'd'},
+        {"filter",       1, 0, 'f'},
         {"print",        0, 0, 'p'},
         {"verbose",      0, 0, 'v'},
         {"help",         0, 0, 'h'},
@@ -417,7 +496,7 @@ int main(int argc, char** argv)
     int usage = 0;
     while (1) {
         int c = getopt_long(
-                    argc, argv, "i:o:ls:d:pvh",
+                    argc, argv, "i:o:ls:d:f:pvh",
                     long_options, &option_index
                 );
 
@@ -440,6 +519,9 @@ int main(int argc, char** argv)
                 break;
             case 'd':
                 distribution = MFU_STRDUP(optarg);
+                break;
+            case 'f':
+                filter_string = MFU_STRDUP(optarg);
                 break;
             case 'p':
                 print = 1;
@@ -569,6 +651,16 @@ int main(int argc, char** argv)
         }
     }
 
+    if (filter_string != NULL) {
+        size_filter = (struct mfu_filter *) MFU_MALLOC(sizeof(struct mfu_filter));
+        if (filter_parse(size_filter, filter_string) != 0) {
+            if (rank == 0) {
+                printf("Failed to parse filter string: %s\n", filter_string);
+                usage = 1;
+            }
+        }
+    }
+
     if (usage) {
         if (rank == 0) {
             print_usage();
@@ -592,31 +684,47 @@ int main(int argc, char** argv)
         mfu_flist_read_cache(inputname, flist);
     }
 
-    /* TODO: filter files */
-    //filter_files(&flist);
+    /* assume we'll use the full list */
+    mfu_flist srcflist = flist;
+
+    /* filter the list if needed */
+    mfu_flist filtered_flist = MFU_FLIST_NULL;
+    if (size_filter != NULL) {
+        /* TODO: filter files */
+        filtered_flist = mfu_flist_filter(flist, size_filter);
+
+        /* update our source list to use the filtered list instead of the original */
+        srcflist = filtered_flist;
+    }
 
     /* sort files */
     if (sortfields != NULL) {
         /* TODO: don't sort unless all_count > 0 */
-        mfu_flist_sort(sortfields, &flist);
+        mfu_flist_sort(sortfields, &srcflist);
     }
 
     /* print details for individual files */
     if (print) {
-        mfu_flist_print(flist);
+        mfu_flist_print(srcflist);
     }
 
     /* print summary about all files */
-    print_summary(flist);
+    print_summary(srcflist);
 
     /* print distribution if user specified this option */
     if (distribution != NULL) {
-        print_flist_distribution(&option, &flist, rank);
+        print_flist_distribution(&option, &srcflist, rank);
     }
 
     /* write data to cache file */
     if (outputname != NULL) {
-        mfu_flist_write_cache(outputname, flist);
+        mfu_flist_write_cache(outputname, srcflist);
+    }
+
+    /* free list if it was used */
+    if (filtered_flist != MFU_FLIST_NULL){
+        /* free the filtered flist (if any) */
+        mfu_flist_free(&filtered_flist);
     }
 
     /* free users, groups, and files objects */
@@ -624,6 +732,8 @@ int main(int argc, char** argv)
 
     /* free memory allocated for options */
     mfu_free(&distribution);
+    mfu_free(&size_filter);
+    mfu_free(&filter_string);
     mfu_free(&sortfields);
     mfu_free(&outputname);
     mfu_free(&inputname);

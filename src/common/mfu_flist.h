@@ -108,6 +108,12 @@ typedef enum mfu_filetypes_e {
     MFU_TYPE_LINK    = 4,
 } mfu_filetype;
 
+struct mfu_filter {
+    char field[16];
+    char operator[8];
+    uint64_t value;
+};
+
 /* define handle type to a file list */
 typedef void* mfu_flist;
 
@@ -368,6 +374,9 @@ int mfu_input_flist_skip(const char* name, void *args);
  * For example to sort by size in descending order, followed by name
  *   char fields[] = "size,-name"; */
 int mfu_flist_sort(const char* fields, mfu_flist* flist);
+
+/* filte the flist with provided filter */
+mfu_flist mfu_flist_filter(mfu_flist *flist, const struct mfu_filter *filter);
 
 /* given a list of files print from start and end of the list */
 void mfu_flist_print(mfu_flist flist);
