@@ -22,6 +22,8 @@
 #ifndef __G_MACROS_H__
 #define __G_MACROS_H__
 #endif
+#include "config.h"
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
@@ -1110,10 +1112,13 @@ mfu_flist mfu_flist_subset(mfu_flist src)
     return bflist;
 }
 
-static bool filter_excute(const struct mfu_filter *filter, uint64_t size)
+static bool filter_excute(mfu_flist *flist, uint64_t idx,
+                          const struct mfu_filter *filter)
 {
     if (filter == NULL)
         return true;
+
+    uint64_t size = mfu_flist_file_get_size(flist, idx);
 
     int len = strlen(filter->operator);
 
@@ -1136,21 +1141,54 @@ static bool filter_excute(const struct mfu_filter *filter, uint64_t size)
     return false;
 }
 
+#ifndef LOV_MAXPOOLNAME
+#define  LOV_MAXPOOLNAME 16
+#endif
+
+static bool check_poolname(mfu_flist *flist, uint64_t idx,
+                           const char *poolname)
+{
+#ifdef LUSTRE_SUPPORT
+    char buf[LOV_MAXPOOLNAME];
+    const char* file_name = mfu_flist_file_get_name(flist, idx);
+    uint64_t count, size;
+    int ret = mfu_get_layout_info(file_name, &size, &count, buf);
+
+    if (ret)
+        return false;
+    return !strncmp(buf, poolname, LOV_MAXPOOLNAME);
+#else
+    return true;
+#endif
+}
+
 /* give a filter (only support size first), filter the flist, return the filtered one */
-mfu_flist mfu_flist_filter(mfu_flist *flist, const struct mfu_filter *filter)
+mfu_flist mfu_flist_filter(mfu_flist *flist,
+                           const struct mfu_filter *filter,
+                           const char *poolname)
 {
     /* create our list to return */
     mfu_flist dest = mfu_flist_subset(flist);
 
     /* check if user passed in an expression, if so then filter the list */
-    if (filter != NULL) {
+    if (filter == NULL && poolname == NULL) {
+        goto out;
+    } else {
         uint64_t idx = 0;
         uint64_t size = mfu_flist_size(flist);
 
         while (idx < size) {
-            uint64_t fsize = mfu_flist_file_get_size(flist, idx);
+            bool pass = true;
 
-            if (filter_excute(filter, fsize)) {
+            if (filter != NULL) {
+                pass = filter_excute(flist, idx, filter);
+            }
+
+            if (pass && poolname != NULL) {
+                pass = check_poolname(flist, idx, poolname);
+            }
+
+            if (pass) {
                 mfu_flist_file_copy(flist, idx, dest);
             }
             /* get next item in our list */
@@ -1160,7 +1198,7 @@ mfu_flist mfu_flist_filter(mfu_flist *flist, const struct mfu_filter *filter)
         /* summarize the filtered list */
         mfu_flist_summarize(dest);
     }
-
+out:
     /* return the filtered list */
     return dest;
 }

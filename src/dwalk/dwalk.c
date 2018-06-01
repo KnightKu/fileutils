@@ -436,6 +436,7 @@ static void print_usage(void)
     printf("      --filter \"size:>:1T\" \n");
     printf("  -d, --distribution <field>:<separators> - print distribution by field\n");
     printf("  -p, --print                             - print files to screen\n");
+    printf("  -P, --pool                              - ost pool, only support lustre now\n");
     printf("  -v, --verbose                           - verbose output\n");
     printf("  -h, --help                              - print usage\n");
     printf("\n");
@@ -474,6 +475,7 @@ int main(int argc, char** argv)
     char* sortfields = NULL;
     char* distribution = NULL;
     char* filter_string = NULL;
+    char* poolname = NULL;
     struct mfu_filter *size_filter = NULL;
     int walk = 0;
     int print = 0;
@@ -488,6 +490,7 @@ int main(int argc, char** argv)
         {"distribution", 1, 0, 'd'},
         {"filter",       1, 0, 'f'},
         {"print",        0, 0, 'p'},
+        {"pool",         1, 0, 'P'},
         {"verbose",      0, 0, 'v'},
         {"help",         0, 0, 'h'},
         {0, 0, 0, 0}
@@ -496,7 +499,7 @@ int main(int argc, char** argv)
     int usage = 0;
     while (1) {
         int c = getopt_long(
-                    argc, argv, "i:o:ls:d:f:pvh",
+                    argc, argv, "i:o:ls:d:f:pP:vh",
                     long_options, &option_index
                 );
 
@@ -525,6 +528,9 @@ int main(int argc, char** argv)
                 break;
             case 'p':
                 print = 1;
+                break;
+            case 'P':
+                poolname = MFU_STRDUP(optarg);
                 break;
             case 'v':
                 mfu_debug_level = MFU_LOG_VERBOSE;
@@ -689,9 +695,9 @@ int main(int argc, char** argv)
 
     /* filter the list if needed */
     mfu_flist filtered_flist = MFU_FLIST_NULL;
-    if (size_filter != NULL) {
+    if (size_filter != NULL || poolname != NULL) {
         /* TODO: filter files */
-        filtered_flist = mfu_flist_filter(flist, size_filter);
+        filtered_flist = mfu_flist_filter(flist, size_filter, poolname);
 
         /* update our source list to use the filtered list instead of the original */
         srcflist = filtered_flist;
@@ -737,6 +743,7 @@ int main(int argc, char** argv)
     mfu_free(&sortfields);
     mfu_free(&outputname);
     mfu_free(&inputname);
+    mfu_free(&poolname);
 
     /* free the path parameters */
     mfu_param_path_free_all(numpaths, paths);

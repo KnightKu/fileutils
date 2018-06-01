@@ -144,6 +144,13 @@ int mfu_closedir(DIR* dirp);
 /* read directory entry, retry a few times on ENOENT, EIO, or EINTR */
 struct dirent* mfu_readdir(DIR* dirp);
 
+/* get the layout info of file */
+int mfu_get_layout_info(const char *path, uint64_t *stripe_size,
+                        uint64_t *stripe_count, char *pool_name);
+/* create files with provided layout info */
+int mfu_create_striped_file(const char *path, uint64_t stripe_size,
+                            int stripe_count, char *pool_name);
+
 #endif /* MFU_IO_H */
 
 /* enable C++ codes to include this header directly */

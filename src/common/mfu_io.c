@@ -17,8 +17,7 @@
  * For details, see https://github.com/hpc/fileutils.
  * Please also read the LICENSE file.
 */
-
-#include "mfu.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +28,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
+#ifdef LUSTRE_SUPPORT
+#include <lustre/lustreapi.h>
+#endif
+
+#include "mfu.h"
 
 #define MFU_IO_TRIES  (5)
 #define MFU_IO_USLEEP (100)
@@ -536,3 +541,126 @@ retry:
     }
     return entry;
 }
+
+/* uses the lustre api to obtain stripe count, stripe size and pool name */
+int mfu_get_layout_info(const char *path, uint64_t *stripe_size,
+                        uint64_t *stripe_count, char *pool_name)
+{
+#ifdef LUSTRE_SUPPORT
+#if defined(HAVE_LLAPI_LAYOUT)
+    /* obtain the llapi_layout for a file by path */
+    struct llapi_layout *layout = llapi_layout_get_by_path(path, 0);
+
+    /* if no llapi_layout is returned, then some problem occured */
+    if (layout == NULL) {
+        return ENOENT;
+    }
+
+    /* obtain stripe count and stripe size */
+    llapi_layout_stripe_size_get(layout, stripe_size);
+    llapi_layout_stripe_count_get(layout, stripe_count);
+    if (pool_name != NULL) {
+        llapi_layout_pool_name_get(layout, pool_name, LOV_MAXPOOLNAME);
+    }
+
+    /* free the alloced llapi_layout */
+    llapi_layout_free(layout);
+
+    return 0;
+#elif defined(HAVE_LLAPI_FILE_GET_STRIPE)
+    int rc;
+    int lumsz = lov_user_md_size(LOV_MAX_STRIPE_COUNT, LOV_USER_MAGIC_V3);
+    struct lov_user_md_v3 *lum = malloc(lumsz);
+    if (lum == NULL)
+        return ENOMEM;
+
+    rc = llapi_file_get_stripe(path, lum);
+    if (rc) {
+        free(lum);
+        return rc;
+    }
+
+    *stripe_size = lum->lmm_stripe_size;
+    *stripe_count = lum->lmm_stripe_count;
+    if (pool_name != NULL) {
+        strncpy(pool_name, lum->lmm_pool_name, LOV_MAXPOOLNAME);
+    }
+
+    free(lum);
+
+    return 0;
+#else
+    fprintf(stderr, "Unexpected Lustre version.\n");
+    fflush(stderr);
+    return -1;
+#endif
+#endif
+
+    return 0;
+}
+
+/* create a striped lustre file at the path provided with the specified stripe size and count */
+int mfu_create_striped_file(const char *path, uint64_t stripe_size,
+                            int stripe_count, char *pool_name)
+{
+#ifdef LUSTRE_SUPPORT
+#if defined(HAVE_LLAPI_LAYOUT)
+    /* create a new llapi_layout for file creation */
+    struct llapi_layout *layout = llapi_layout_alloc();
+    int fd = -1;
+
+    if (stripe_count == -1) {
+        /* stripe count of -1 means use all availabe devices */
+        llapi_layout_stripe_count_set(layout, LLAPI_LAYOUT_WIDE);
+    } else if (stripe_count == 0) {
+        /* stripe count of 0 means use the lustre filesystem default */
+        llapi_layout_stripe_count_set(layout, LLAPI_LAYOUT_DEFAULT);
+    } else {
+        /* use the number of stripes specified*/
+        llapi_layout_stripe_count_set(layout, stripe_count);
+    }
+
+    /* specify the pool name */
+    if (pool_name != NULL) {
+        llapi_layout_pool_name_set(layout, pool_name);
+    }
+
+    /* specify the stripe size of each stripe */
+    llapi_layout_stripe_size_set(layout, stripe_size);
+
+    /* create the file */
+    fd = llapi_layout_file_create(path, 0, 0644, layout);
+    if (fd < 0) {
+        fprintf(stderr, "cannot create %s: %s\n", path, strerror(errno));
+        fflush(stderr);
+        return -1;
+    }
+    close(fd);
+
+    /* free our alloced llapi_layout */
+    llapi_layout_free(layout);
+    return 0;
+#elif defined(HAVE_LLAPI_FILE_CREATE)
+    int rc;
+
+    if (pool_name == NULL) {
+        rc = llapi_file_create(path, stripe_size, 0, stripe_count, LOV_PATTERN_RAID0);
+    } else {
+        rc = llapi_file_create_pool(path, stripe_size, 0, stripe_count,
+                                    LOV_PATTERN_RAID0, pool_name);
+    }
+
+    if (rc < 0) {
+        fprintf(stderr, "cannot create %s: %s\n", path, strerror(-rc));
+        fflush(stderr);
+    } else {
+        return 0;
+    }
+#else
+    fprintf(stderr, "Unexpected Lustre version.\n");
+    fflush(stderr);
+#endif
+#endif
+    return -1;
+}
+
