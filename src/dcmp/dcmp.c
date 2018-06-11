@@ -55,6 +55,7 @@ static void print_usage(void)
     printf("       -o EXIST=ONLY_SRC,TYPE=DIFFER,PERM=DIFFER,MTIME=DIFFER:"
            "fileA -o MTIME=DIFFER:fileB\n");
     printf("  -v, --verbose\n");
+    printf("  -r, --raw   - write raw data to output file rather than text format\n");
     printf("  -h, --help  - print usage\n");
     printf("\n");
     fflush(stdout);
@@ -156,6 +157,7 @@ struct dcmp_output {
 struct dcmp_options {
     struct list_head outputs;      /* list of outputs */
     int verbose;
+    int format;			   /* output data format, 0 for text, 1 for raw */
     int base;                      /* whether to do base check */
     int debug;                     /* check result after get result */
     int need_compare[DCMPF_MAX];   /* fields that need to be compared  */
@@ -164,6 +166,7 @@ struct dcmp_options {
 struct dcmp_options options = {
     .outputs      = LIST_HEAD_INIT(options.outputs),
     .verbose      = 0,
+    .format       = 0,
     .base         = 0,
     .debug        = 0,
     .need_compare = {0,}
@@ -2027,7 +2030,11 @@ static int dcmp_output_write(
     mfu_flist_summarize(src_matched);
     mfu_flist_summarize(dst_matched);
     if (output->file_name != NULL) {
-        mfu_flist_write_cache(output->file_name, new_flist);
+        if (options.format) {
+            mfu_flist_write_cache(output->file_name, new_flist);
+        } else {
+            mfu_flist_write_text(output->file_name, new_flist);
+        }
     }
 
     int rank;
@@ -2309,6 +2316,7 @@ int main(int argc, char **argv)
         {"debug",    0, 0, 'd'},
         {"output",   1, 0, 'o'},
         {"verbose",  0, 0, 'v'},
+        {"raw",      0, 0, 'r'},
         {"help",     0, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -2320,7 +2328,7 @@ int main(int argc, char **argv)
     int help  = 0;
     while (1) {
         int c = getopt_long(
-            argc, argv, "sbdo:vh",
+            argc, argv, "sbdo:vhr",
             long_options, &option_index
         );
 
@@ -2347,6 +2355,9 @@ int main(int argc, char **argv)
         case 'v':
             options.verbose++;
             mfu_debug_level = MFU_LOG_VERBOSE;
+            break;
+        case 'r':
+            options.format = 1;
             break;
         case 'h':
         case '?':

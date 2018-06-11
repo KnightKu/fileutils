@@ -439,6 +439,7 @@ static void print_usage(void)
     printf("  -P, --pool                              - ost pool, only support lustre now\n");
     printf("  -v, --verbose                           - verbose output\n");
     printf("  -h, --help                              - print usage\n");
+    printf("  -r, --raw                               - write raw data to output file rather than text format\n");
     printf("\n");
     printf("Fields: name,user,group,uid,gid,atime,mtime,ctime,size\n");
     printf("\n");
@@ -479,6 +480,7 @@ int main(int argc, char** argv)
     struct mfu_filter *size_filter = NULL;
     int walk = 0;
     int print = 0;
+    int raw = 0;
     struct distribute_option option;
 
     int option_index = 0;
@@ -493,13 +495,14 @@ int main(int argc, char** argv)
         {"pool",         1, 0, 'P'},
         {"verbose",      0, 0, 'v'},
         {"help",         0, 0, 'h'},
+        {"raw",          0, 0, 'r'},
         {0, 0, 0, 0}
     };
 
     int usage = 0;
     while (1) {
         int c = getopt_long(
-                    argc, argv, "i:o:ls:d:f:pP:vh",
+                    argc, argv, "i:o:ls:d:f:pP:vhr",
                     long_options, &option_index
                 );
 
@@ -534,6 +537,9 @@ int main(int argc, char** argv)
                 break;
             case 'v':
                 mfu_debug_level = MFU_LOG_VERBOSE;
+                break;
+            case 'r':
+                raw = 1;
                 break;
             case 'h':
                 usage = 1;
@@ -724,7 +730,11 @@ int main(int argc, char** argv)
 
     /* write data to cache file */
     if (outputname != NULL) {
-        mfu_flist_write_cache(outputname, srcflist);
+        if (raw) {
+            mfu_flist_write_cache(outputname, flist);
+        } else {
+            mfu_flist_write_text(outputname, flist);
+        }
     }
 
     /* free list if it was used */
