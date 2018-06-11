@@ -646,12 +646,12 @@ int mfu_create_striped_file(const char *path, uint64_t stripe_size,
     if (pool_name == NULL) {
         rc = llapi_file_create(path, stripe_size, 0, stripe_count, LOV_PATTERN_RAID0);
     } else {
-        rc = llapi_file_create_pool(path, stripe_size, 0, stripe_count,
-                                    LOV_PATTERN_RAID0, pool_name);
+        rc = llapi_file_create_pool(path, stripe_size, -1, stripe_count,
+                                    0, pool_name);
     }
 
     if (rc < 0) {
-        fprintf(stderr, "cannot create %s: %s\n", path, strerror(-rc));
+        fprintf(stderr, "cannot create %s[%s]: %s\n", path,pool_name, strerror(-rc));
         fflush(stderr);
     } else {
         return 0;

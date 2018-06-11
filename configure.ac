@@ -89,6 +89,7 @@ AC_CONFIG_FILES([Makefile                \
                  src/drm/Makefile        \
                  src/dstripe/Makefile    \
                  src/dwalk/Makefile      \
+                 src/dmigrate/Makefile      \
 ])
 
 # Check if we should build the experimental utilities.
